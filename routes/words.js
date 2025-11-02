@@ -19,7 +19,8 @@ const upload = multer({ storage: multer.memoryStorage() });
 // ----------------------------------------------------------------
 router.get('/template', authMiddleware, (req, res) => {
     // 템플릿 파일의 내용 (Question,Answer 형식)
-    const templateData = "Question,Answer\n" +
+    const BOM = "\uFEFF";
+    const templateData = BOM+"Question,Answer\n" +
                          "Apple,사과\n" +
                          "Banana,바나나\n" +
                          "Computer,컴퓨터\n";
@@ -53,7 +54,7 @@ router.post('/upload', authMiddleware, upload.single('wordFile'), async (req, re
     bufferStream.end(req.file.buffer);
 
     bufferStream
-        .pipe(csv())
+        .pipe(csv({ bom:true }))
         .on('data', (row) => {
             // CSV의 각 행(row)을 words 배열에 추가
             if (row.Question && row.Answer) {
