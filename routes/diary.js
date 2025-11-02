@@ -13,30 +13,26 @@ const router = express.Router();
 // ----------------------------------------------------------------
 router.get('/date/:date', authMiddleware, async (req, res) => {
     const userId = req.user.id;
-    const diaryDate = req.params.date; // YYYY-MM-DD 형식의 날짜
+    const diaryDate = req.params.date; 
 
     try {
         // 1. 해당 날짜에 작성된 일기 조회
         const diarySql = 'SELECT id, title, content FROM Diaries WHERE userId = ? AND diaryDate = ?';
         const [diaries] = await pool.execute(diarySql, [userId, diaryDate]);
 
-        // 2. 해당 날짜에 마감일이 설정된 할 일(Todos) 조회
-        // 캘린더 화면에 "일부"만 보여주기 위해, 우선은 모두 가져와서 프론트에서 필터링하거나, 
-        // SQL에서 미완료된 항목만 최대 N개로 제한할 수 있음. 여기서는 미완료 5개만 조회.
         const todoSql = `
-            SELECT id, title, isCompleted 
+            SELECT id, title, memo, isCompleted 
             FROM Todos 
             WHERE userId = ? AND dueDate = ? 
             ORDER BY isCompleted ASC, createdAt DESC 
             LIMIT 5
         `;
+        // --- (memo가 SELECT 목록에 포함되었습니다) ---
+        
         const [todos] = await pool.execute(todoSql, [userId, diaryDate]);
 
-        // 3. 응답 데이터 통합 (일기는 단일 항목일 것을 가정하고 첫 번째 항목을 사용)
         res.status(200).json({
-            // 캘린더 화면의 '한 줄 일기' 또는 상세 내용 표시를 위해 사용
             diary: diaries[0] || null, 
-            // 캘린더 화면의 '오늘의 할 일' 목록 표시를 위해 사용
             todos: todos
         });
 

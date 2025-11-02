@@ -8,26 +8,29 @@ const authMiddleware = require('../middleware/auth');
 const router = express.Router();
 
 // ----------------------------------------------------------------
-// [POST] /api/todos : 새로운 할 일을 생성
+// [POST] /api/todos : 새로운 할 일을 생성 (memo 추가)
 // ----------------------------------------------------------------
 router.post('/', authMiddleware, async (req, res) => {
     const userId = req.user.id;
-    const { title, dueDate } = req.body;
+    // --- 🔥 1. memo 필드 가져오기 ---
+    const { title, dueDate, memo } = req.body;
 
     try {
         if (!title || title.trim().length === 0) {
             return res.status(400).json({ message: '할 일 내용을 입력해주세요.' });
         }
         
-        //dueDate가 빈 문자열일 경우 NULL로 처리
         const finalDueDate = dueDate || null;
+        const finalMemo = memo || null; // memo가 없으면 NULL
 
-        const sql = 'INSERT INTO Todos (userId, title, dueDate, isCompleted) VALUES (?, ?, ?, ?)';
-        const [result] = await pool.execute(sql, [userId, title, finalDueDate, false]); 
+        // --- 🔥 2. memo 컬럼에 INSERT ---
+        const sql = 'INSERT INTO Todos (userId, title, memo, dueDate, isCompleted) VALUES (?, ?, ?, ?, ?)';
+        const [result] = await pool.execute(sql, [userId, title, finalMemo, finalDueDate, false]); 
 
         res.status(201).json({ 
             id: result.insertId,
             title,
+            memo: finalMemo, // --- 🔥 3. memo 응답에 포함 ---
             dueDate: finalDueDate,
             isCompleted: false,
             message: '할 일이 성공적으로 생성되었습니다.' 
@@ -40,27 +43,25 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // ----------------------------------------------------------------
-// [GET] /api/todos : 사용자의 모든 할 일 목록 또는 특정 날짜의 할 일 조회
+// [GET] /api/todos : 할 일 조회 (memo 추가)
 // ----------------------------------------------------------------
 router.get('/', authMiddleware, async (req, res) => {
     const userId = req.user.id;
     const { date, includeCompleted } = req.query; 
 
     try {
-        let sql = 'SELECT id, title, isCompleted, dueDate, createdAt, updatedAt FROM Todos WHERE userId = ?';
+        // --- 🔥 4. SELECT에 memo 추가 ---
+        let sql = 'SELECT id, title, memo, isCompleted, dueDate, createdAt, updatedAt FROM Todos WHERE userId = ?';
         let params = [userId];
 
-        // 1. 특정 날짜(캘린더) 필터링
         if (date) {
             sql += ' AND DATE(dueDate) = ?';
             params.push(date);
         }
         
-        // 2. 완료 여부 필터링 (쿼리 파라미터가 없거나 'true'가 아니면 미완료만 조회)
         if (includeCompleted !== 'true') {
              sql += ' AND isCompleted = FALSE';
         }
-
 
         sql += ' ORDER BY dueDate ASC, createdAt DESC';
 
@@ -75,15 +76,15 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // ----------------------------------------------------------------
-// [PUT] /api/todos/:id : 할 일 내용(제목, 마감일) 수정
+// [PUT] /api/todos/:id : 할 일 내용 수정 (memo 추가)
 // ----------------------------------------------------------------
 router.put('/:id', authMiddleware, async (req, res) => {
     const userId = req.user.id;
     const todoId = req.params.id;
-    const { title, dueDate } = req.body;
+    // --- 🔥 5. memo 필드 가져오기 ---
+    const { title, dueDate, memo } = req.body;
     
-    // 최소한 하나 이상의 수정할 필드가 있는지 확인
-    if (!title && !dueDate) {
+    if (!title && !dueDate && memo === undefined) { // memo가 undefined인 경우(수정 안 함)는 제외
         return res.status(400).json({ message: '수정할 내용을 입력해주세요.' });
     }
 
@@ -99,12 +100,23 @@ router.put('/:id', authMiddleware, async (req, res) => {
             params.push(title);
         }
         
-        // dueDate가 명시되면 수정, 없으면 null로 수정 허용
         if (dueDate !== undefined) {
              updateFields.push('dueDate = ?');
              params.push(dueDate || null);
         }
 
+        // --- 🔥 6. memo 수정 로직 추가 ---
+        // (memo는 빈 문자열 ""로 저장하는 것도 허용)
+        if (memo !== undefined) {
+            updateFields.push('memo = ?');
+            params.push(memo || null); // 빈 문자열이 오면 null로 저장
+        }
+        // -----------------------------
+
+        // 업데이트할 필드가 하나도 없으면 400 반환 (예: body: {})
+        if (updateFields.length === 0) {
+             return res.status(400).json({ message: '수정할 내용이 없습니다.' });
+        }
 
         const sql = `UPDATE Todos SET ${updateFields.join(', ')} WHERE id = ? AND userId = ?`;
         params.push(todoId, userId);
@@ -112,7 +124,6 @@ router.put('/:id', authMiddleware, async (req, res) => {
         const [result] = await pool.execute(sql, params);
 
         if (result.affectedRows === 0) {
-            // 해당 ID의 할 일이 없거나, 해당 사용자의 할 일이 아닌 경우
             return res.status(404).json({ message: '할 일을 찾을 수 없거나 수정 권한이 없습니다.' });
         }
 
@@ -125,19 +136,17 @@ router.put('/:id', authMiddleware, async (req, res) => {
 });
 
 // ----------------------------------------------------------------
-// [PUT] /api/todos/:id/toggle : 할 일 완료 상태 토글 (핵심 갓생 로직)
+// [PUT] /api/todos/:id/toggle : (수정 불필요)
 // ----------------------------------------------------------------
 router.put('/:id/toggle', authMiddleware, async (req, res) => {
+    // (이하 코드 동일)
     const userId = req.user.id;
     const todoId = req.params.id;
-    const { isCompleted } = req.body; // true 또는 false
+    const { isCompleted } = req.body; 
 
     if (typeof isCompleted !== 'boolean') {
         return res.status(400).json({ message: 'isCompleted 값은 true 또는 false여야 합니다.' });
     }
-    
-    // **트랜잭션**을 사용하여 Todo 업데이트와 경험치/레벨 로직을 묶는 것이 안전함.
-    // 하지만 여기서는 단순 업데이트만 구현하고 경험치 로직은 분리 (다음 단계 제안).
     
     try {
         const sql = 'UPDATE Todos SET isCompleted = ? WHERE id = ? AND userId = ?';
@@ -147,7 +156,7 @@ router.put('/:id/toggle', authMiddleware, async (req, res) => {
             return res.status(404).json({ message: '할 일을 찾을 수 없거나 권한이 없습니다.' });
         }
         
-        // TODO: isCompleted가 true로 바뀌는 순간 (성공) 캐릭터에게 경험치를 지급하는 로직 추가 필요!
+        // (경험치 로직...)
 
         res.status(200).json({ 
             message: `할 일이 ${isCompleted ? '완료' : '미완료'} 처리되었습니다.`,
@@ -161,9 +170,10 @@ router.put('/:id/toggle', authMiddleware, async (req, res) => {
 });
 
 // ----------------------------------------------------------------
-// [DELETE] /api/todos/:id : 할 일 삭제
+// [DELETE] /api/todos/:id : (수정 불필요)
 // ----------------------------------------------------------------
 router.delete('/:id', authMiddleware, async (req, res) => {
+    // (이하 코드 동일)
     const userId = req.user.id;
     const todoId = req.params.id;
 
