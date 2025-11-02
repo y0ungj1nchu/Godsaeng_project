@@ -12,19 +12,20 @@ const router = express.Router();
 // [POST] /api/study/start : 순공시간 측정 시작
 // ----------------------------------------------------------------
 router.post('/start', authMiddleware, async (req, res) => {
-    // 1. JWT 인증 미들웨어를 통해 사용자 ID 획득
     const userId = req.user.id;
-
     try {
-        // 2. StudyLogs 테이블에 새로운 세션 시작 시간 기록
-        // endTime과 duration은 NULL 상태로 시작
+        const [existing] = await pool.execute(
+            'SELECT id FROM StudyLogs WHERE userId = ? AND endTime IS NULL',
+            [userId]
+        );
+        if (existing.length > 0) {
+            return res.status(409).json({ message: '이미 측정이 시작된 기록이 있습니다. 먼저 종료해주세요.' });
+        }
+
         const sql = 'INSERT INTO StudyLogs (userId, startTime) VALUES (?, NOW())';
         const [result] = await pool.execute(sql, [userId]); 
         
         const logId = result.insertId;
-
-        // 3. 프론트엔드에 생성된 로그 ID를 반환. 
-        //    프론트엔드는 이 ID를 스톱워치 종료 시 다시 서버로 보내야 함.
         res.status(201).json({ 
             logId: logId,
             message: '순공시간 측정을 시작했습니다.' 
@@ -41,14 +42,13 @@ router.post('/start', authMiddleware, async (req, res) => {
 // ----------------------------------------------------------------
 router.put('/stop/:logId', authMiddleware, async (req, res) => {
     const userId = req.user.id;
-    const logId = req.params.logId; // URL 경로에서 로그 ID를 받음
+    const logId = req.params.logId;
 
     let connection;
     try {
         connection = await pool.getConnection();
-        await connection.beginTransaction(); // 트랜잭션 시작 (원자성 보장)
+        await connection.beginTransaction(); // 트랜잭션 시작
 
-        // 1. 해당 로그 ID의 시작 시간(startTime)을 조회 (현재 사용자가 소유하고, 아직 종료되지 않은 세션만)
         const [logs] = await connection.execute(
             'SELECT startTime FROM StudyLogs WHERE id = ? AND userId = ? AND endTime IS NULL',
             [logId, userId]
@@ -62,11 +62,10 @@ router.put('/stop/:logId', authMiddleware, async (req, res) => {
         const startTime = new Date(logs[0].startTime);
         const endTime = new Date();
         
-        // 2. 경과 시간 계산 (밀리초(ms) 단위로 계산 후 초 단위로 변환)
         const durationSeconds = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
         
-        // 3. 5초 미만의 짧은 시간은 무시 (노이즈 필터링)
         if (durationSeconds < 5) {
+            // 5초 미만이면 기록하지 않고 롤백 (단, 로그 자체를 지우진 않음. 필요시 DELETE 추가)
             await connection.rollback(); 
             return res.status(200).json({ 
                 message: '너무 짧은 시간(5초 미만)은 기록되지 않습니다.', 
@@ -74,32 +73,43 @@ router.put('/stop/:logId', authMiddleware, async (req, res) => {
             });
         }
 
-        // 4. StudyLogs 업데이트 (종료 시간과 기간 기록)
+        // --- (duration 계산을 DB에 맡김) ---
+        // DB의 NOW()와 startTime을 직접 비교하여 duration을 계산하고 업데이트
         const [updateResult] = await connection.execute(
-            'UPDATE StudyLogs SET endTime = NOW(), duration = ? WHERE id = ? AND userId = ?',
-            [durationSeconds, logId, userId]
+            `UPDATE StudyLogs SET endTime = NOW(), duration = TIMESTAMPDIFF(SECOND, startTime, NOW()) 
+             WHERE id = ? AND userId = ?`,
+            [logId, userId]
         );
+        // -----------------------------------------
 
-        // 5. ⭐️ 핵심 갓생 로직: 경험치 (XP) 지급 및 레벨업 체크
+        // --- (방금 저장된 duration을 다시 가져옴) ---
+        const [updatedLog] = await connection.execute(
+            'SELECT duration FROM StudyLogs WHERE id = ?',
+            [logId]
+        );
+        const savedDuration = updatedLog[0].duration;
+        // ---------------------------------------------
+
         let levelUpInfo = null;
-        const studyMinutes = Math.floor(durationSeconds / 60);
+        const studyMinutes = Math.floor(savedDuration / 60); // 수정됨
         if (studyMinutes > 0) {
-             const expAmount = studyMinutes * 1; // 1분당 1 경험치 지급 (예시)
-             // ⭐️ 3. 경험치 업데이트 함수 호출 (connection 전달 필요, 함수 수정 필요)
-             levelUpInfo = await updateExpAndCheckLevelUp(userId, expAmount, connection); // connection 전달하도록 함수 수정 필요
+             const expAmount = studyMinutes * 100; 
+             // ⭐️ characterUtils 함수에 'connection'을 전달하여 트랜잭션을 유지
+             levelUpInfo = await updateExpAndCheckLevelUp(userId, expAmount, connection); 
         }
 
-        await connection.commit(); // 트랜잭션 성공적으로 완료
+        await connection.commit();
         
         res.status(200).json({ 
             message: '순공시간 측정을 종료하고 기록했습니다.',
-            durationSeconds: durationSeconds,
-            durationMinutes: (durationSeconds / 60).toFixed(2) // 분 단위도 함께 제공
+            durationSeconds: savedDuration, // 수정됨
+            durationMinutes: (savedDuration / 60).toFixed(2), // 수정됨
+            levelUpInfo: levelUpInfo
         });
 
     } catch (error) {
         if (connection) {
-            await connection.rollback(); // 오류 발생 시 롤백
+            await connection.rollback();
         }
         console.error('순공시간 종료 API 오류:', error);
         res.status(500).json({ message: '서버 오류가 발생했습니다.' });
@@ -110,5 +120,85 @@ router.put('/stop/:logId', authMiddleware, async (req, res) => {
     }
 });
 
+
+// ----------------------------------------------------------------
+// [GET] /api/study/summary : 학습 시간 요약 (오류 수정됨)
+// ----------------------------------------------------------------
+router.get('/summary', authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    // 1. KST 기준 오늘 날짜 (YYYY-MM-DD)
+    const todayKST = new Date(new Date().getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // 2. KST 기준 이번 주 월요일 (수정됨)
+    const now = new Date();
+    const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const dayOfWeek = kstNow.getUTCDay(); // 0=Sun, 1=Mon...
+    const offset = (dayOfWeek === 0 ? 6 : dayOfWeek - 1); // 월(0)~일(6)
+    
+    // --- (원본 날짜 훼손 방지) ---
+    const startOfWeekKST = new Date(kstNow.getTime()); // kstNow 복제
+    startOfWeekKST.setUTCDate(startOfWeekKST.getUTCDate() - offset); // 복제본 수정
+    const weekStartKST = startOfWeekKST.toISOString().split('T')[0];
+    // ---------------------------------------
+
+    // --- (CONVERT_TZ 제거) ---
+    // 3. 쿼리 실행 (startTime은 이미 KST이므로 DATE()만 사용)
+    const [todayRows] = await pool.execute(
+      `SELECT SUM(duration) as total 
+       FROM StudyLogs 
+       WHERE userId = ? AND DATE(startTime) = ?`,
+      [userId, todayKST]
+    );
+
+    const [weekRows] = await pool.execute(
+      `SELECT SUM(duration) as total 
+       FROM StudyLogs 
+       WHERE userId = ? AND DATE(startTime) >= ?`,
+      [userId, weekStartKST]
+    );
+    // ---------------------------------------
+
+    const todayStudy = todayRows[0]?.total || 0;
+    const weekStudy = weekRows[0]?.total || 0;
+
+    res.json({ todayStudy, weekStudy });
+
+  } catch (error) {
+    console.error('학습 요약 조회 오류:', error);
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
+  }
+});
+
+// GET /api/study/current : 현재 진행 중인(멈추지 않은) 학습 세션 조회
+router.get('/current', authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    // endTime이 NULL인 기록을 찾음
+    const [rows] = await pool.execute(
+      'SELECT id, startTime FROM StudyLogs WHERE userId = ? AND endTime IS NULL ORDER BY startTime DESC LIMIT 1',
+      [userId]
+    );
+
+    if (rows.length > 0) {
+      // 찾으면 logId와 startTime을 반환
+      res.json({
+        activeSession: {
+          logId: rows[0].id,
+          startTime: rows[0].startTime // (예: '2025-11-02T16:30:00.000Z')
+        }
+      });
+    } else {
+      // 진행 중인 세션이 없음
+      res.json({ activeSession: null });
+    }
+
+  } catch (error) {
+    console.error('진행 중인 세션 조회 오류:', error);
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
+  }
+});
 
 module.exports = router;
