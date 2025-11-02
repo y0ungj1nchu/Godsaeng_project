@@ -84,7 +84,15 @@ router.post('/upload', authMiddleware, upload.single('wordFile'), async (req, re
                 // 모든 작업 성공 시 커밋
                 await connection.commit();
 
-                res.status(201).json({ message: `'${setTitle}' 단어장이 성공적으로 생성되었습니다.`, wordSetId: newWordSetId });
+                res.status(201).json({ 
+                    message: `'${setTitle}' 단어장이 성공적으로 생성되었습니다.`, 
+                    wordSetId: newWordSetId,
+                    newSet: { // 🔴 프론트엔드 상태 즉시 업데이트를 위해 새 객체 반환
+                        id: newWordSetId,
+                        setTitle: setTitle,
+                        createdAt: new Date().toISOString()
+                    }
+                });
 
             } catch (error) {
                 await connection.rollback(); // 오류 발생 시 롤백
@@ -97,7 +105,7 @@ router.post('/upload', authMiddleware, upload.single('wordFile'), async (req, re
 });
 
 // ----------------------------------------------------------------
-// [GET] /api/wordsets : 내 모든 단어장 목록 조회
+// [GET] /api/words/wordsets : 내 모든 단어장 목록 조회
 // ----------------------------------------------------------------
 router.get('/wordsets', authMiddleware, async (req, res) => {
     const userId = req.user.id;
@@ -112,14 +120,14 @@ router.get('/wordsets', authMiddleware, async (req, res) => {
 });
 
 // ----------------------------------------------------------------
-// [GET] /api/wordsets/:id : 특정 단어장의 모든 단어 조회 (게임용)
+// [GET] /api/words/wordsets/:id : 특정 단어장의 모든 단어 조회 (게임용)
 // ----------------------------------------------------------------
 router.get('/wordsets/:id', authMiddleware, async (req, res) => {
     const userId = req.user.id;
     const wordSetId = req.params.id;
     try {
         // 본인 소유의 단어장인지 먼저 확인
-        const checkSql = 'SELECT id FROM WordSets WHERE id = ? AND userId = ?';
+        const checkSql = 'SELECT id, setTitle FROM WordSets WHERE id = ? AND userId = ?'; // 🔴 setTitle도 함께 조회
         const [ownerCheck] = await pool.execute(checkSql, [wordSetId, userId]);
         if (ownerCheck.length === 0) {
             return res.status(404).json({ message: '단어장을 찾을 수 없거나 권한이 없습니다.' });
@@ -127,11 +135,97 @@ router.get('/wordsets/:id', authMiddleware, async (req, res) => {
 
         const sql = 'SELECT id, question, answer FROM Words WHERE wordSetId = ?';
         const [words] = await pool.execute(sql, [wordSetId]);
-        res.status(200).json(words);
+        
+        // 🔴 프론트엔드에서 퀴즈 생성 로직을 단순화하기 위해 백엔드에서 보기(options) 생성
+        const wordListForQuiz = words.map(word => {
+            // 1. 정답
+            const correct = word.answer;
+            
+            // 2. 오답 (자신을 제외한 다른 단어의 뜻)
+            const wrongOptions = words
+                .filter(w => w.id !== word.id)
+                .map(w => w.answer);
+            
+            // 3. 오답 3개 무작위 추출 (단어 수가 4개 미만일 경우 중복 허용)
+            let options = [correct];
+            while(options.length < 4 && wrongOptions.length > 0) {
+                 const randomIndex = Math.floor(Math.random() * wrongOptions.length);
+                 const randomOption = wrongOptions.splice(randomIndex, 1)[0];
+                 if (!options.includes(randomOption)) {
+                     options.push(randomOption);
+                 }
+                 // 만약 단어 수가 2~3개 뿐이라 오답 풀이 부족하면 정답을 중복 추가 (방어 코드)
+                 if (wrongOptions.length === 0 && options.length < 4) {
+                     options.push(correct); 
+                 }
+            }
+
+            return {
+                word: word.question, // "Apple"
+                correct: correct,    // "사과"
+                options: options     // ["사과", "바나나", "컴퓨터", "비행기"]
+            };
+        });
+
+        res.status(200).json({
+            setName: ownerCheck[0].setTitle,
+            wordList: wordListForQuiz // 퀴즈 형식으로 가공된 데이터
+        });
     } catch (error) {
         console.error('단어 조회 API 오류:', error);
         res.status(500).json({ message: '서버 오류가 발생했습니다.' });
     }
 });
+
+router.delete('/wordsets/:id', authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+  const wordSetId = req.params.id;
+  
+  const connection = await pool.getConnection(); // 트랜잭션 시작
+
+  try {
+    await connection.beginTransaction();
+
+    // 1. 단어장이 현재 사용자의 소유인지 확인
+    const [ownerRows] = await connection.execute(
+      'SELECT userId FROM WordSets WHERE id = ?',
+      [wordSetId]
+    );
+
+    if (ownerRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: '단어장을 찾을 수 없습니다.' });
+    }
+    if (ownerRows[0].userId !== userId) {
+      await connection.rollback();
+      return res.status(403).json({ message: '삭제 권한이 없습니다.' });
+    }
+
+    // 2. 자식 레코드(Words) 삭제 (외래 키 제약)
+    await connection.execute(
+      'DELETE FROM Words WHERE wordSetId = ?',
+      [wordSetId]
+    );
+
+    // 3. 부모 레코드(WordSets) 삭제
+    await connection.execute(
+      'DELETE FROM WordSets WHERE id = ? AND userId = ?',
+      [wordSetId, userId]
+    );
+
+    // 4. 트랜잭션 커밋
+    await connection.commit();
+
+    res.json({ message: '단어장이 성공적으로 삭제되었습니다.' });
+
+  } catch (error) {
+    await connection.rollback(); // 오류 시 롤백
+    console.error('단어장 삭제 오류:', error);
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
+  } finally {
+    connection.release(); // 커넥션 반환
+  }
+});
+
 
 module.exports = router;
