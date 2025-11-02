@@ -12,7 +12,8 @@ const dbConfig = {
   database: process.env.DB_DATABASE,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  charset: 'utf8mb4'
 };
 
 // DB 커넥션 풀 생성
