@@ -4,7 +4,7 @@
  */
 const express = require('express');
 const pool = require('../config/db');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 const { updateExpAndCheckLevelUp } = require('../utils/characterUtils');
 const router = express.Router();
 
@@ -93,7 +93,7 @@ router.put('/stop/:logId', authMiddleware, async (req, res) => {
         let levelUpInfo = null;
         const studyMinutes = Math.floor(savedDuration / 60); // 수정됨
         if (studyMinutes > 0) {
-             const expAmount = studyMinutes * 100; 
+             const expAmount = studyMinutes; 
              // ⭐️ characterUtils 함수에 'connection'을 전달하여 트랜잭션을 유지
              levelUpInfo = await updateExpAndCheckLevelUp(userId, expAmount, connection); 
         }
