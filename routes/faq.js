@@ -12,7 +12,7 @@ const pool = require('../config/db');
 router.get('/', async (req, res) => {
   try {
     const sql = `
-      SELECT id, category, question, answer 
+      SELECT id, category, question, answer, createdAt
       FROM FAQs 
       ORDER BY category, id DESC
     `;
