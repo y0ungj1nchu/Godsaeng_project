@@ -50,6 +50,21 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
+/**
+ * 관리자 권한 확인 미들웨어
+ * - authMiddleware가 반드시 먼저 실행되어야 함.
+ * - req.user 객체에 있는 role이 'ADMIN'인지 확인.
+ */
+const adminOnly = (req, res, next) => {
+  if (req.user && req.user.role === 'ADMIN') {
+    next(); // 관리자일 경우 다음 미들웨어로 진행
+  } else {
+    // 관리자가 아닐 경우 접근 거부
+    res.status(403).json({ message: '접근 권한이 없습니다. 관리자만 사용 가능합니다.' });
+  }
+};
+
+
 // 다른 파일에서 이 미들웨어(함수)를 사용하도록 내보냄.
-module.exports = authMiddleware;
+module.exports = { authMiddleware, adminOnly };
 
