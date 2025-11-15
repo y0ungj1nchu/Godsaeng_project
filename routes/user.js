@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcrypt'); // (님의 파일 기준: bcrypt)
 const pool = require('../config/db');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 // [GET] /api/user/me : 현재 로그인한 사용자의 프로필 정보를 조회
