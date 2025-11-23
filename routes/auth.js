@@ -107,10 +107,10 @@ router.post('/login', async (req, res) => {
 
     // JWT 발급 (2시간 유효)
     const token = jwt.sign(
-      { id: user.id, email: user.email, nickname: user.nickname },
-      JWT_SECRET,
-      { expiresIn: '2h' }
-    );
+    { id: user.id, email: user.email, nickname: user.nickname, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '2h' }
+);
 
     // 응답 (비밀번호 제외한 사용자 정보 포함)
     res.status(200).json({
@@ -120,6 +120,7 @@ router.post('/login', async (req, res) => {
         id: user.id,
         email: user.email,
         nickname: user.nickname,
+        role: user.role,
         createdAt: user.createdAt
       }
     });
