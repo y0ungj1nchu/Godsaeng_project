@@ -253,4 +253,91 @@ router.delete("/wordsets/:id", authMiddleware, async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------
+   [GET] /api/words/admin-sets
+   → role = 'ADMIN' 사용자들이 업로드한 단어장 목록 조회
+ ------------------------------------------------------------------ */
+router.get("/admin-sets", authMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `
+      SELECT ws.id, ws.setTitle, ws.createdAt
+      FROM WordSets ws
+      JOIN Users u ON u.id = ws.userId
+      WHERE u.role = 'ADMIN'
+      ORDER BY ws.createdAt DESC
+      `
+    );
+
+    res.json({ wordsets: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "관리자 단어장 조회 오류" });
+  }
+});
+
+/* ------------------------------------------------------------------
+   [GET] /api/words/admin-sets/:id
+   → 관리자 제공 단어장 퀴즈 생성
+------------------------------------------------------------------ */
+router.get("/admin-sets/:id", authMiddleware, async (req, res) => {
+  const setId = req.params.id;
+
+  try {
+    // 관리자 단어장인지 확인
+    const [setInfo] = await pool.execute(
+      `
+      SELECT ws.id, ws.setTitle 
+      FROM WordSets ws 
+      JOIN Users u ON u.id = ws.userId
+      WHERE ws.id = ? AND u.role = 'ADMIN'
+      `,
+      [setId]
+    );
+
+    if (setInfo.length === 0) {
+      return res.status(404).json({ message: "관리자 단어장을 찾을 수 없습니다." });
+    }
+
+    // 단어 가져오기
+    const [words] = await pool.execute(
+      "SELECT id, question, answer FROM Words WHERE wordSetId = ?",
+      [setId]
+    );
+
+    const allAnswers = words.map((w) => w.answer);
+
+    const quizList = words.map((word) => {
+      const correct = word.answer;
+      const wrong = allAnswers.filter((a) => a !== correct);
+      const count = Math.min(4, allAnswers.length);
+
+      let options = [correct];
+      const shuffled = [...wrong].sort(() => Math.random() - 0.5);
+
+      for (let i = 0; i < count - 1; i++) {
+        if (shuffled[i]) options.push(shuffled[i]);
+      }
+
+      const finalOptions = options.sort(() => Math.random() - 0.5);
+
+      return {
+        word: word.question,
+        correct,
+        options: finalOptions,
+      };
+    });
+
+    res.json({
+      setName: setInfo[0].setTitle,
+      wordList: quizList,
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "관리자 퀴즈 생성 오류" });
+  }
+});
+
+
 module.exports = router;
