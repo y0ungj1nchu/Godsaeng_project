@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require("../config/db");
 const { authMiddleware, adminOnly } = require("../middleware/auth");
 const multer = require("multer");
-const xlsx = require("xlsx");
+const XLSX = require("xlsx");
 
 // ---------------------------------------
 // 1) 단어 세트 목록 조회
@@ -18,18 +18,22 @@ router.get("/sets", authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ---------------------------------------
-// 2) 단어 세트 생성
+// 2) 단어 세트 생성 (파일 없이 생성)
 // ---------------------------------------
 router.post("/sets", authMiddleware, adminOnly, async (req, res) => {
   const { title } = req.body;
-  const adminId = req.user.id; // 관리자 계정 userId 사용
+  const adminId = req.user.id;
 
-  await pool.execute(
+  if (!title?.trim()) {
+    return res.status(400).json({ message: "세트 이름을 입력하세요." });
+  }
+
+  const [result] = await pool.execute(
     "INSERT INTO WordSets (userId, setTitle) VALUES (?, ?)",
-    [adminId, title]
+    [adminId, title.trim()]
   );
 
-  res.json({ message: "세트 생성 완료!" });
+  res.json({ message: "세트 생성 완료!", setId: result.insertId });
 });
 
 // ---------------------------------------
@@ -63,9 +67,13 @@ router.get("/sets/:id/words", authMiddleware, adminOnly, async (req, res) => {
 router.post("/word", authMiddleware, adminOnly, async (req, res) => {
   const { wordSetId, question, answer } = req.body;
 
+  if (!wordSetId || !question?.trim() || !answer?.trim()) {
+    return res.status(400).json({ message: "필수 값이 부족합니다." });
+  }
+
   await pool.execute(
     "INSERT INTO Words (wordSetId, question, answer) VALUES (?, ?, ?)",
-    [wordSetId, question, answer]
+    [wordSetId, question.trim(), answer.trim()]
   );
 
   res.json({ message: "단어 추가 완료" });
@@ -83,49 +91,62 @@ router.delete("/word/:id", authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ---------------------------------------
-// 7) 엑셀 업로드로 단어 세트 생성
+// 7) 엑셀 업로드 → 단어만 파싱해서 반환 (세트 생성 X)
 // ---------------------------------------
+const normalizeCell = (v) =>
+  String(v ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-const upload = multer({ dest: "uploads/excel" });
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.post(
   "/upload",
   authMiddleware,
   adminOnly,
-  upload.single("file"),
+  upload.single("wordFile"),
   async (req, res) => {
-    const { title } = req.body;
-    const adminId = req.user.id;
-
     if (!req.file) {
-      return res.status(400).json({ message: "파일 없음" });
+      return res.status(400).json({ message: "엑셀 파일을 선택해주세요." });
     }
 
-    const workbook = xlsx.readFile(req.file.path);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = xlsx.utils.sheet_to_json(sheet);
+    try {
+      // 엑셀 파싱
+      const data = req.file.buffer;
+      const wb = XLSX.read(data);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rowsRaw = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
-    // WordSet 생성
-    const [result] = await pool.execute(
-      "INSERT INTO WordSets (userId, setTitle) VALUES (?, ?)",
-      [adminId, title]
-    );
+      const parsed = rowsRaw
+        .map((r) => ({
+          word: normalizeCell(r.word ?? r.question ?? ""),
+          correct: normalizeCell(r.correct ?? r.answer ?? ""),
+        }))
+        .filter((r) => r.word && r.correct);
 
-    const wordSetId = result.insertId;
+      if (parsed.length === 0) {
+        return res.status(400).json({
+          message: "유효한 단어 목록이 없습니다. (word, correct 필요)",
+        });
+      }
 
-    // Words 삽입
-    for (let row of rows) {
-      await pool.execute(
-        "INSERT INTO Words (wordSetId, question, answer) VALUES (?, ?, ?)",
-        [wordSetId, row.question, row.answer]
-      );
+      // 🔥 세트 생성 절대 하지 않음 → 단어 리스트만 반환
+      return res.json({
+        message: "엑셀 분석 성공",
+        words: parsed,
+      });
+
+    } catch (err) {
+      console.error("엑셀 파싱 오류:", err);
+      return res.status(500).json({ message: "엑셀 파일 처리 오류" });
     }
-
-    res.json({ message: "엑셀 업로드 완료" });
   }
 );
 
-// 단어 수정
+// ---------------------------------------
+// 8) 단어 수정
+// ---------------------------------------
 router.put("/word/:id", authMiddleware, adminOnly, async (req, res) => {
   const { id } = req.params;
   const { question, answer } = req.body;
