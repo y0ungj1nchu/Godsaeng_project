@@ -16,13 +16,13 @@ router.get("/dashboard", authMiddleware, adminOnly, async (req, res) => {
 
     // 총 사용자 수
     const [userCountRows] = await pool.execute(
-      "SELECT COUNT(*) AS totalUsers FROM Users"
-    );
+  "SELECT COUNT(*) AS totalUsers FROM Users WHERE role != 'ADMIN'"
+);
     const totalUsers = userCountRows[0].totalUsers || 0;
 
     // 오늘 가입한 사용자 수
     const [newUserRows] = await pool.execute(
-      "SELECT COUNT(*) AS newUsers FROM Users WHERE DATE(createdAt) = CURDATE()"
+      "SELECT COUNT(*) AS newUsers FROM Users WHERE role != 'ADMIN' AND DATE(createdAt) = CURDATE()"
     );
     const newUsers = newUserRows[0].newUsers || 0;
 
