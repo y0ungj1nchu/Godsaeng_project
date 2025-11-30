@@ -6,8 +6,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../config/db");
 
-const authMiddleware = require("../middleware/auth");
-const { adminOnly } = require("../middleware/auth");
+const { authMiddleware, adminOnly } = require('../middleware/auth');
 
 
 // ================================================================
