@@ -23,7 +23,9 @@ const adminGameRoutes = require("./routes/adminGame");
 const adminNoticeRoutes = require("./routes/adminNotice");
 const adminFaqRoutes = require("./routes/adminFAQ");
 const adminInquiryRoutes = require("./routes/adminInquiry");
-
+const notificationsRoutes = require("./routes/notifications");
+const categoryRoutes = require("./routes/category");
+const calendarRoutes = require("./routes/calander");
 
 const app = express();
 app.use(cors());
@@ -49,6 +51,10 @@ app.use("/api/admin/game", adminGameRoutes);
 app.use("/api/admin/notice", adminNoticeRoutes);
 app.use("/api/admin/faq", adminFaqRoutes);
 app.use("/api/admin/inquiry", adminInquiryRoutes);
+app.use("/api/notifications", notificationsRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/calendar", calendarRoutes);
+
 
 // 서버 실행
 const PORT = 3001;

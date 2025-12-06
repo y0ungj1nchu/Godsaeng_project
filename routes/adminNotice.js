@@ -3,10 +3,20 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../config/db");
 const { authMiddleware, adminOnly } = require("../middleware/auth");
+const { createNotification } = require("../utils/notificationService");
 
 // ===========================================================
-// 1) 공지사항 목록 조회
-// GET /api/admin/notice
+// 1) 전체 사용자 목록 가져오기 함수
+// ===========================================================
+async function getAllUsers() {
+  const [rows] = await pool.execute(
+    "SELECT id FROM Users WHERE role = 'USER'"
+  );
+  return rows;
+}
+
+// ===========================================================
+// 2) 공지사항 목록 조회
 // ===========================================================
 router.get("/", authMiddleware, adminOnly, async (req, res) => {
   try {
@@ -24,9 +34,9 @@ router.get("/", authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+
 // ===========================================================
-// 2) 공지사항 등록
-// POST /api/admin/notice
+// 3) 공지 등록 + 전체 사용자 알림 전송
 // ===========================================================
 router.post("/", authMiddleware, adminOnly, async (req, res) => {
   const { title, content } = req.body;
@@ -37,27 +47,35 @@ router.post("/", authMiddleware, adminOnly, async (req, res) => {
   }
 
   try {
-    const sql = `
-      INSERT INTO Announcements (adminId, title, content)
-      VALUES (?, ?, ?)
-    `;
-    const [result] = await pool.execute(sql, [adminId, title, content]);
+    // 공지 생성
+    const [result] = await pool.execute(
+      `INSERT INTO Announcements (adminId, title, content) VALUES (?, ?, ?)`,
+      [adminId, title, content]
+    );
 
-    res.status(201).json({
-      message: "공지사항 등록 성공",
-      id: result.insertId,
-      title,
-      content
-    });
+    // 🔔 전체 사용자 목록 가져오기
+    const users = await getAllUsers();
+
+    // 🔔 전체 사용자에게 알림 전송
+    for (const u of users) {
+      await createNotification(
+        u.id,
+        "notice_created",
+        "새 공지사항이 등록되었습니다.",
+        `공지 제목: ${title}`
+      );
+    }
+
+    res.status(201).json({ message: "공지사항 등록 성공" });
   } catch (err) {
     console.error("공지사항 등록 오류:", err);
     res.status(500).json({ message: "공지사항 등록 실패" });
   }
 });
 
+
 // ===========================================================
-// 3) 공지사항 수정
-// PUT /api/admin/notice/:id
+// 4) 공지 수정 + 전체 사용자에게 알림 전송
 // ===========================================================
 router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
   const { id } = req.params;
@@ -69,6 +87,19 @@ router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
       [title, content, id]
     );
 
+    // 🔔 전체 사용자 목록 가져오기
+    const users = await getAllUsers();
+
+    // 🔔 전체 사용자에게 알림 전송
+    for (const u of users) {
+      await createNotification(
+        u.id,
+        "notice_updated",
+        "공지사항이 수정되었습니다.",
+        `수정된 제목: ${title}`
+      );
+    }
+
     res.json({ message: "공지사항 수정 성공" });
   } catch (err) {
     console.error("공지사항 수정 오류:", err);
@@ -76,9 +107,9 @@ router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+
 // ===========================================================
-// 4) 공지사항 삭제
-// DELETE /api/admin/notice/:id
+// 5) 공지 삭제
 // ===========================================================
 router.delete("/:id", authMiddleware, adminOnly, async (req, res) => {
   const { id } = req.params;

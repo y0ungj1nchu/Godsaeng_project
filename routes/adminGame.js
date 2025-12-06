@@ -288,4 +288,27 @@ router.put("/word/:id", authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// 세트 제목 수정
+router.put("/wordsets/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newTitle } = req.body;
+
+    if (!newTitle || newTitle.trim() === "") {
+      return res.status(400).json({ message: "세트 이름은 필수입니다." });
+    }
+
+    await db.query(
+      "UPDATE WordSets SET setTitle = ? WHERE id = ?",
+      [newTitle.trim(), id]
+    );
+
+    res.json({ message: "세트 이름이 수정되었습니다." });
+  } catch (err) {
+    console.error("세트 수정 중 오류:", err);
+    res.status(500).json({ message: "서버 오류" });
+  }
+});
+
+
 module.exports = router;
