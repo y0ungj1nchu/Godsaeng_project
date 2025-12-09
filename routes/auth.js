@@ -126,7 +126,7 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign(
       { id: user.id, role: user.role },
       JWT_SECRET,
-      { expiresIn: '7d' } // 7일 유지
+      { expiresIn: '2h' } // 2시간 유지
     );
 
     // ------------------------------------------
