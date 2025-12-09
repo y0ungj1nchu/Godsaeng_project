@@ -256,30 +256,42 @@ router.get("/stats/last7", authMiddleware, async (req, res) => {
   const userId = req.user.id;
 
   try {
-    const today = new Date(Date.now() + 9 * 3600 * 1000);
+    // 🔥 지금 서버 시간 사용 (KST 가정)
+    const today = new Date();
 
+    // 🔥 최근 7일 날짜 라벨(YYYY-MM-DD) 생성
     const days = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
-      days.push(d.toISOString().split("T")[0]);
+
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+
+      days.push(`${yyyy}-${mm}-${dd}`);
     }
 
+    // 🔥 SQL (시간대 변환 없음)
     const sql = `
       SELECT DATE(startTime) AS date, SUM(duration) AS sec
       FROM StudyLogs
-      WHERE userId = ? AND DATE(startTime) BETWEEN ? AND ?
+      WHERE userId = ?
+        AND DATE(startTime) BETWEEN ? AND ?
       GROUP BY DATE(startTime)
       ORDER BY DATE(startTime)
     `;
 
     const [rows] = await pool.execute(sql, [userId, days[0], days[6]]);
 
+    // 🔥 날짜 - 시간 매핑
     const map = {};
     rows.forEach(r => {
-      map[r.date] = r.sec || 0;   // 🔥 초 단위
+      const dateKey = r.date.toISOString().split("T")[0]; // ← DATE 필드 안전 변환
+      map[dateKey] = r.sec || 0;
     });
 
+    // 🔥 days 배열 순서에 맞춰 값 생성
     const seconds = days.map(d => map[d] || 0);
 
     res.json({ labels: days, seconds });
@@ -288,5 +300,6 @@ router.get("/stats/last7", authMiddleware, async (req, res) => {
     res.status(500).json({ message: "최근 7일 통계 조회 실패" });
   }
 });
+
 
 module.exports = router;
