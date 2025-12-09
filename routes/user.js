@@ -218,7 +218,7 @@ router.patch('/theme', authMiddleware, async (req, res) => {
 
 
 // -------------------------------------------------------
-// ⭐ 추가: 관리자 전용 테스트 API (adminOnly 적용 예시)
+// 관리자 전용 테스트 API
 // -------------------------------------------------------
 router.get('/admin/test', authMiddleware, adminOnly, (req, res) => {
   res.json({ message: "관리자 전용 API 접근 성공!" });
