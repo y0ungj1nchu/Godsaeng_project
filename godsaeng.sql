@@ -60,7 +60,7 @@ CREATE TABLE Characters (
     id INT AUTO_INCREMENT PRIMARY KEY,
     userId INT NOT NULL UNIQUE,
     characterName VARCHAR(50) DEFAULT '캐릭터',
-    characterImage VARCHAR(100) DEFAULT '1764912294208-59005739',
+    characterImage VARCHAR(100) DEFAULT 'snoopy1',
     level INT DEFAULT 1,
     exp INT DEFAULT 0,
     FOREIGN KEY (userId) REFERENCES Users(id) ON DELETE CASCADE
