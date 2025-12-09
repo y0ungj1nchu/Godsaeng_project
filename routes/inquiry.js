@@ -13,7 +13,15 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
     const sql = `
-      SELECT id, title, content, status, createdAt, answer, answeredAt 
+      SELECT 
+        id,
+        title,
+        content,
+        status,
+        createdAt,
+        answer,
+        answeredAt AS answerTime,
+        answeredAt AS answerUpdatedTime
       FROM Inquiries 
       WHERE userId = ? 
       ORDER BY createdAt DESC
@@ -35,7 +43,15 @@ router.get('/:inquiryId', authMiddleware, async (req, res) => {
     const { inquiryId } = req.params;
 
     const sql = `
-      SELECT id, title, content, status, createdAt, answer, answeredAt 
+      SELECT 
+        id,
+        title,
+        content,
+        status,
+        createdAt,
+        answer,
+        answeredAt AS answerTime,
+        answeredAt AS answerUpdatedTime
       FROM Inquiries 
       WHERE id = ? AND userId = ?
     `;
@@ -109,7 +125,7 @@ router.put('/:inquiryId', authMiddleware, async (req, res) => {
     // 3. 문의 내용 수정
     const updateSql = `
       UPDATE Inquiries 
-      SET title = ?, content = ? 
+      SET title = ?, content = ?
       WHERE id = ?
     `;
     await pool.execute(updateSql, [title, content, inquiryId]);
