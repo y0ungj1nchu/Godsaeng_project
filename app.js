@@ -27,7 +27,10 @@ const adminInquiryRoutes = require("./routes/adminInquiry");
 const notificationsRoutes = require("./routes/notifications");
 const categoryRoutes = require("./routes/category");
 const calendarRoutes = require("./routes/calander");
+
+//소셜로그인
 const kakaoRoutes = require("./routes/kakao");
+const naverRoutes = require("./routes/naver");
 
 const app = express();
 app.use(cors());
@@ -56,7 +59,10 @@ app.use("/api/admin/inquiry", adminInquiryRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/calendar", calendarRoutes);
+
+//소셜로그인
 app.use("/auth/kakao", kakaoRoutes);
+app.use("/auth/naver", naverRoutes);
 
 // 서버 실행
 const PORT = 3001;
